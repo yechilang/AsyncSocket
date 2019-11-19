@@ -2529,125 +2529,155 @@ enum GCDAsyncSocketConfig
 
 - (BOOL)connectWithAddress4:(NSData *)address4 address6:(NSData *)address6 error:(NSError **)errPtr
 {
-	LogTrace();
-	
-	NSAssert(dispatch_get_specific(IsOnSocketQueueOrTargetQueueKey), @"Must be dispatched on socketQueue");
-	
-	LogVerbose(@"IPv4: %@:%hu", [[self class] hostFromAddress:address4], [[self class] portFromAddress:address4]);
-	LogVerbose(@"IPv6: %@:%hu", [[self class] hostFromAddress:address6], [[self class] portFromAddress:address6]);
-	
-	// Determine socket type
-	
-	BOOL preferIPv6 = (config & kPreferIPv6) ? YES : NO;
-	
-	BOOL useIPv6 = ((preferIPv6 && address6) || (address4 == nil));
-	
-	// Create the socket
-	
-	int socketFD;
-	NSData *address;
-	NSData *connectInterface;
-	
-	if (useIPv6)
-	{
-		LogVerbose(@"Creating IPv6 socket");
-		
-		socket6FD = socket(AF_INET6, SOCK_STREAM, 0);
-		
-		socketFD = socket6FD;
-		address = address6;
-		connectInterface = connectInterface6;
-	}
-	else
-	{
-		LogVerbose(@"Creating IPv4 socket");
-		
-		socket4FD = socket(AF_INET, SOCK_STREAM, 0);
-		
-		socketFD = socket4FD;
-		address = address4;
-		connectInterface = connectInterface4;
-	}
-	
-	if (socketFD == SOCKET_NULL)
-	{
-		if (errPtr)
-			*errPtr = [self errnoErrorWithReason:@"Error in socket() function"];
-		
-		return NO;
-	}
-	
-	// Bind the socket to the desired interface (if needed)
-	
-	if (connectInterface)
-	{
-		LogVerbose(@"Binding socket...");
-		
-		if ([[self class] portFromAddress:connectInterface] > 0)
-		{
-			// Since we're going to be binding to a specific port,
-			// we should turn on reuseaddr to allow us to override sockets in time_wait.
-			
-			int reuseOn = 1;
-			setsockopt(socketFD, SOL_SOCKET, SO_REUSEADDR, &reuseOn, sizeof(reuseOn));
-		}
-		
-		const struct sockaddr *interfaceAddr = (const struct sockaddr *)[connectInterface bytes];
-		
-		int result = bind(socketFD, interfaceAddr, (socklen_t)[connectInterface length]);
-		if (result != 0)
-		{
-			if (errPtr)
-				*errPtr = [self errnoErrorWithReason:@"Error in bind() function"];
-			
-			return NO;
-		}
-	}
-	
-	// Prevent SIGPIPE signals
-	
-	int nosigpipe = 1;
-	setsockopt(socketFD, SOL_SOCKET, SO_NOSIGPIPE, &nosigpipe, sizeof(nosigpipe));
-	
-	// Start the connection process in a background queue
-	
-	int aStateIndex = stateIndex;
-	__weak GCDAsyncSocket *weakSelf = self;
-	
-	dispatch_queue_t globalConcurrentQueue = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0);
-	dispatch_async(globalConcurrentQueue, ^{
-	#pragma clang diagnostic push
-	#pragma clang diagnostic warning "-Wimplicit-retain-self"
-	
-		int result = connect(socketFD, (const struct sockaddr *)[address bytes], (socklen_t)[address length]);
-		
-		__strong GCDAsyncSocket *strongSelf = weakSelf;
-		if (strongSelf == nil) return_from_block;
-		
-		if (result == 0)
-		{
-			dispatch_async(strongSelf->socketQueue, ^{ @autoreleasepool {
-				
-				[strongSelf didConnect:aStateIndex];
-			}});
-		}
-		else
-		{
-			NSError *error = [strongSelf errnoErrorWithReason:@"Error in connect() function"];
-			
-			dispatch_async(strongSelf->socketQueue, ^{ @autoreleasepool {
-				
-				[strongSelf didNotConnect:aStateIndex error:error];
-			}});
-		}
-		
-	#pragma clang diagnostic pop
-	});
-	
-	LogVerbose(@"Connecting...");
-	
-	return YES;
+    LogTrace();
+    
+    NSAssert(dispatch_get_specific(IsOnSocketQueueOrTargetQueueKey), @"Must be dispatched on socketQueue");
+    
+    LogVerbose(@"IPv4: %@:%hu", [[self class] hostFromAddress:address4], [[self class] portFromAddress:address4]);
+    LogVerbose(@"IPv6: %@:%hu", [[self class] hostFromAddress:address6], [[self class] portFromAddress:address6]);
+    
+    // Determine socket type
+    
+    BOOL preferIPv6 = (config & kPreferIPv6) ? YES : NO;
+    
+    BOOL useIPv6 = ((preferIPv6 && address6) || (address4 == nil));
+    
+    // Create the socket
+    
+    int socketFD;
+    NSData *address;
+    NSData *connectInterface;
+    
+    if (useIPv6)
+    {
+        LogVerbose(@"Creating IPv6 socket");
+        
+        socket6FD = socket(AF_INET6, SOCK_STREAM, 0);
+        
+        socketFD = socket6FD;
+        address = address6;
+        connectInterface = connectInterface6;
+    }
+    else
+    {
+        LogVerbose(@"Creating IPv4 socket");
+        
+        socket4FD = socket(AF_INET, SOCK_STREAM, 0);
+        
+        socketFD = socket4FD;
+        address = address4;
+        connectInterface = connectInterface4;
+    }
+    
+    if (socketFD == SOCKET_NULL)
+    {
+        if (errPtr)
+            *errPtr = [self errnoErrorWithReason:@"Error in socket() function"];
+        
+        return NO;
+    }
+    
+    // Bind the socket to the desired interface (if needed)
+    
+    if (connectInterface)
+    {
+        LogVerbose(@"Binding socket...");
+        
+        if ([[self class] portFromAddress:connectInterface] > 0)
+        {
+            // Since we're going to be binding to a specific port,
+            // we should turn on reuseaddr to allow us to override sockets in time_wait.
+            
+            int reuseOn = 1;
+            setsockopt(socketFD, SOL_SOCKET, SO_REUSEADDR, &reuseOn, sizeof(reuseOn));
+        }
+        
+        const struct sockaddr *interfaceAddr = (const struct sockaddr *)[connectInterface bytes];
+        
+        int result = bind(socketFD, interfaceAddr, (socklen_t)[connectInterface length]);
+        if (result != 0)
+        {
+            if (errPtr)
+                *errPtr = [self errnoErrorWithReason:@"Error in bind() function"];
+            
+            return NO;
+        }
+    }
+    
+    // Prevent SIGPIPE signals
+    
+    int nosigpipe = 1;
+    setsockopt(socketFD, SOL_SOCKET, SO_NOSIGPIPE, &nosigpipe, sizeof(nosigpipe));
+    
+    // Start the connection process in a background queue
+    
+    int aStateIndex = stateIndex;
+    __weak GCDAsyncSocket *weakSelf = self;
+    
+    dispatch_queue_t globalConcurrentQueue = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0);
+    dispatch_async(globalConcurrentQueue, ^{
+#pragma clang diagnostic push
+#pragma clang diagnostic warning "-Wimplicit-retain-self"
+        
+        int oldFlag = fcntl(socketFD, F_GETFL);
+        fcntl(socketFD, F_SETFL, oldFlag | O_NONBLOCK);
+        NSLog(@"=-=mq  fuck  fuck pre %lf", [[NSDate date] timeIntervalSince1970]);
+        
+        int result = connect(socketFD, (const struct sockaddr *)[address bytes], (socklen_t)[address length]);
+        
+        NSLog(@"=-=mq  fuck  fuck after %lf    result : %d", [[NSDate date] timeIntervalSince1970], result);
+        
+        __strong GCDAsyncSocket *strongSelf = weakSelf;
+        if (strongSelf == nil) return_from_block;
+        
+        if (result == 0) {
+            NSLog(@"=-=mq 连接成功(瞬间)");
+            fcntl(socketFD, F_SETFL, oldFlag);
+            dispatch_async(strongSelf->socketQueue, ^{ @autoreleasepool {
+                [strongSelf didConnect:aStateIndex];
+            }});
+        } else { // 连接中 或者 EINPROGRESS
+            fd_set writeFD;
+            __DARWIN_FD_ZERO(&writeFD);
+            __DARWIN_FD_SET(socketFD, &writeFD);
+            struct timeval timeOut = {3, 0}; // 超时时间
+            
+            result = select(socketFD + 1, NULL, &writeFD, NULL, &timeOut); // 使用select判断超时
+            if (result <= 0 || !__DARWIN_FD_ISSET(socketFD, &writeFD)) {
+                NSLog(@"=-=mq 连接超时");
+                close(socketFD);
+                dispatch_async(strongSelf->socketQueue, ^{ @autoreleasepool {
+                    NSError *error = [strongSelf errnoErrorWithReason:@"Error in connect() function"];
+                    [strongSelf didNotConnect:aStateIndex error:error];
+                }});
+            } else {
+                int error = 0;
+                socklen_t length = sizeof(error);
+                int canGetError = getsockopt(socketFD, SOL_SOCKET, SO_ERROR, &error, &length);
+                if (canGetError < 0 || error != 0) { // 不能获取错误信息 或者 获取到错误信息
+                    NSLog(@"=-=mq 连接失败");
+                    close(socketFD);
+                    dispatch_async(strongSelf->socketQueue, ^{ @autoreleasepool {
+                        NSError *err = [strongSelf errnoErrorWithReason:@"Error in connect() function"];
+                        [strongSelf didNotConnect:aStateIndex error:err];
+                    }});
+                } else { // 连接成功
+                    NSLog(@"=-=mq 连接成功(缓慢)");
+                    fcntl(socketFD, F_SETFL, oldFlag);
+                    dispatch_async(strongSelf->socketQueue, ^{ @autoreleasepool {
+                        [strongSelf didConnect:aStateIndex];
+                    }});
+                }
+            }
+        }
+#pragma clang diagnostic pop
+    });
+    
+    LogVerbose(@"Connecting...");
+    
+    return YES;
 }
+
 
 - (BOOL)connectWithAddressUN:(NSData *)address error:(NSError **)errPtr
 {
